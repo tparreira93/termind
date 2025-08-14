@@ -1,0 +1,51 @@
+[package]
+name = "termind"
+version = "0.3.0"
+edition = "2021"
+description = "Privacy-first, AI-powered terminal that runs entirely on your machine"
+authors = ["Your Name <your.email@example.com>"]
+license = "MIT"
+
+[dependencies]
+# GPU Rendering (Phase A)
+wgpu = "0.20"
+winit = "0.29"
+cosmic-text = "0.12"
+bytemuck = { version = "1.14", features = ["derive"] }
+pollster = "0.3"
+
+# PTY Management (Phase A)
+nix = { version = "0.27", features = ["fs", "term", "signal", "process"] }
+tokio = { version = "1.0", features = ["full"] }
+tokio-util = { version = "0.7", features = ["compat"] }
+libc = "0.2"
+
+# VT Parsing (Phase A)
+vte = "0.11"
+
+# Data Storage (Phase A Week 3 - Block Detection)
+sqlx = { version = "0.7", features = ["sqlite", "runtime-tokio-rustls", "chrono"] }
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.0", features = ["v4"] }
+
+# Command parsing and utilities
+clap = { version = "4.0", features = ["derive"] }
+dirs = "5.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Async utilities
+futures = "0.3"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+# Block detection and text processing (Phase A Week 3)
+regex = "1.10"
+tree-sitter = "0.20"
+tree-sitter-bash = "0.20"
