@@ -148,6 +148,18 @@ impl TextGrid {
         }
     }
     
+    pub fn set_char(&mut self, row: u16, col: u16, ch: char) {
+        if row < self.rows && col < self.cols {
+            self.cells[row as usize][col as usize] = Cell {
+                ch,
+                fg_color: TerminalColor::White,
+                bg_color: TerminalColor::Black,
+                attrs: CellAttributes::default(),
+            };
+            self.mark_dirty(row, col, 1, 1);
+        }
+    }
+    
     pub fn newline(&mut self) {
         self.cursor_col = 0;
         if self.cursor_row >= self.scroll_region_bottom {
@@ -338,6 +350,15 @@ impl TextGrid {
         self.cells
             .get(row as usize)?
             .get(col as usize)
+    }
+    
+    pub fn set_cell(&mut self, row: u16, col: u16, cell: &Cell) {
+        if let Some(row_cells) = self.cells.get_mut(row as usize) {
+            if let Some(target_cell) = row_cells.get_mut(col as usize) {
+                *target_cell = cell.clone();
+                self.mark_dirty(row, col, 1, 1);
+            }
+        }
     }
     
     pub fn row(&self, index: u16) -> Option<&Vec<Cell>> {

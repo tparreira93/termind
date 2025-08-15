@@ -11,9 +11,12 @@ license = "MIT"
 wgpu = "0.20"
 winit = "0.29"
 softbuffer = "0.4"
+raw-window-handle = "0.6"
 cosmic-text = "0.12"
 bytemuck = { version = "1.14", features = ["derive"] }
 pollster = "0.3"
+fontdue = "0.9.0"
+# pixels = "0.13"  # Commented out due to version conflicts
 
 # PTY Management (Phase A)
 nix = { version = "0.27", features = ["fs", "term", "signal", "process"] }

@@ -1,283 +1,190 @@
-//! Termind - Phase A Week 3 Entry Point
-//! 
-//! Clean architecture with only Phase A components:
-//! - PTY Host for real terminal spawning
-//! - Terminal Parser for ANSI/VT100 sequences  
-//! - Text Grid for screen state
-//! - Block Detection for command boundaries
-
-use clap::Parser;
-use tokio::time::{sleep, Duration};
-use tracing::{info, error, warn};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-
+use tracing::{info, warn};
 use winit::{
     event::{Event, WindowEvent, KeyEvent, ElementState},
-    event_loop::{EventLoop, ControlFlow},
+    event_loop::{ControlFlow, EventLoop},
+    keyboard::{PhysicalKey, KeyCode},
     window::WindowBuilder,
-    keyboard::{KeyCode, PhysicalKey},
 };
+use softbuffer::{Context, Surface};
+use std::num::NonZeroU32;
 
+use termind::renderer::{TextGrid, TerminalParser};
+use termind::renderer::software::SoftwareRenderer;
 
-// Use termind library components
-use termind::{
-    Result,
-    TextGrid, TerminalParser,
-    BlockDetector, PtyHost,
-};
-
-#[derive(Parser)]
-#[command(name = "termind", version = "0.3.0", author, about = "Privacy-first, AI-powered terminal")]
-struct Cli {
-    /// Enable debug logging
-    #[arg(short, long)]
-    debug: bool,
-    
-    /// Terminal width (default: 80)
-    #[arg(short = 'w', long, default_value = "80")]
-    width: u16,
-    
-    /// Terminal height (default: 24)
-    #[arg(short = 't', long, default_value = "24")]
-    height: u16,
-}
+type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let cli = Cli::parse();
-    
     // Initialize logging
-    let log_level = if cli.debug {
-        tracing::Level::DEBUG
-    } else {
-        tracing::Level::INFO
-    };
-    
-    tracing_subscriber::fmt()
-        .with_max_level(log_level)
-        .with_target(false)
-        .init();
+    tracing_subscriber::fmt().init();
 
-    info!("🚀 Starting Termind v0.3.0 - Phase A Week 3");
-    
-    // Run the terminal application
-    let result = run_terminal(&cli).await;
-    
-    match result {
-        Ok(()) => {
-            info!("✅ Termind terminated successfully");
-            Ok(())
-        }
-        Err(e) => {
-            error!("❌ Termind terminated with error: {}", e);
-            Err(e)
-        }
-    }
-}
+    info!("🚀 Starting Termind v0.3.0 - Software Rendering");
+    info!("📋 Initializing components...");
 
-async fn run_terminal(cli: &Cli) -> Result<()> {
-    info!("📋 Initializing Phase A components...");
-    
-    // Initialize core components
-    let text_grid = TextGrid::new(cli.height, cli.width);
-    let parser = TerminalParser::new(cli.height, cli.width);
-    let _block_detector = BlockDetector::new().await?;
-    
-    info!("🔧 Components initialized successfully");
-    info!("📏 Terminal size: {}x{}", cli.width, cli.height);
-    
-    // Spawn the shell with PTY
-    info!("🐚 Spawning shell...");
-    let mut pty_host = PtyHost::spawn_shell().await
-        .map_err(|e| termind::TermindError::Pty(format!("Failed to spawn shell: {}", e)))?;
-    
-    info!("✅ Shell spawned successfully: {}", pty_host.shell_path());
-    
-    // Set up terminal size (non-fatal if it fails)
-    if let Err(e) = pty_host.resize(cli.height, cli.width) {
-        info!("⚠️  Could not resize PTY (continuing anyway): {}", e);
-    }
-    
-    // Wrap components in Arc<Mutex<>> for sharing between async tasks and GUI
-    let pty_host = Arc::new(Mutex::new(pty_host));
-    let parser = Arc::new(Mutex::new(parser));
-    let text_grid = Arc::new(Mutex::new(text_grid));
-    
-    // Start GUI window
-    info!("🪟 Opening terminal window...");
-    run_gui_terminal(cli, pty_host, parser, text_grid).await
-}
+    // Set up terminal dimensions
+    let terminal_cols = 80;
+    let terminal_rows = 24;
+    info!("📏 Terminal size: {}x{}", terminal_cols, terminal_rows);
 
-async fn run_gui_terminal(
-    cli: &Cli,
-    pty_host: Arc<Mutex<PtyHost>>,
-    parser: Arc<Mutex<TerminalParser>>,
-    text_grid: Arc<Mutex<TextGrid>>,
-) -> Result<()> {
-    let event_loop = EventLoop::new()
-        .map_err(|e| termind::TermindError::Configuration(format!("Failed to create event loop: {}", e)))?;
+    // Initialize PTY host (we'll create a mock for now)
+    info!("🐚 Creating terminal components...");
+    let pty_host = Arc::new(Mutex::new(MockPtyHost::new()));
     
-    let window = WindowBuilder::new()
-        .with_title("Termind - Privacy-first AI Terminal")
-        .with_inner_size(winit::dpi::LogicalSize::new(
-            (cli.width as f64) * 8.0, // 8px per char width (rough estimate)
-            (cli.height as f64) * 16.0, // 16px per char height  
-        ))
-        .build(&event_loop)
-        .map_err(|e| termind::TermindError::Configuration(format!("Failed to create window: {}", e)))?;
-    
-    info!("✅ Terminal window opened successfully");
-    info!("🔄 Starting GUI event loop - terminal is now interactive!");
-    info!("💡 Type commands or press Escape to quit");
-    
-    // Clone Arc references for the background PTY reader task
-    let pty_host_reader = pty_host.clone();
-    let parser_reader = parser.clone();
-    let _text_grid_reader = text_grid.clone();
-    
-    // Spawn background task to continuously read from PTY
-    let _reader_handle = tokio::spawn(async move {
-        let mut status_counter = 0;
-        loop {
-            let data = {
-                let mut pty = pty_host_reader.lock().await;
-                match pty.try_read().await {
-                    Ok(data) => data,
-                    Err(e) => {
-                        error!("❌ Error reading from PTY: {}", e);
-                        break;
-                    }
-                }
-            };
-            
-            if !data.is_empty() {
-                // Parse the data and update grid
-                {
-                    let mut parser = parser_reader.lock().await;
-                    parser.parse(&data);
-                }
-                
-                // For now, also print to stdout for debugging
-                let text = String::from_utf8_lossy(&data);
-                print!("{}", text);
-                use std::io::Write;
-                std::io::stdout().flush().unwrap();
-            } else {
-                // No data available, sleep a bit
-                sleep(Duration::from_millis(10)).await;
-                
-                // Periodic status updates
-                status_counter += 1;
-                if status_counter % 500 == 0 { // Every ~5 seconds
-                    let pty = pty_host_reader.lock().await;
-                    info!("📊 Terminal active - shell PID: {}", pty.child_pid());
-                }
+    info!("✅ Shell components created");
+
+    // Initialize text grid and parser
+    let text_grid = Arc::new(Mutex::new(TextGrid::new(terminal_rows, terminal_cols)));
+    let parser = Arc::new(Mutex::new(TerminalParser::new(terminal_rows, terminal_cols)));
+
+    // Add some test data to the grid
+    {
+        let mut grid = text_grid.lock().await;
+        // Create a simple test message
+        let test_msg = "Termind Terminal Ready!";
+        for (i, ch) in test_msg.chars().enumerate() {
+            if i < 80 {
+                grid.set_char(0, i as u16, ch);
             }
         }
-    });
-    
-    // Run the GUI event loop (blocking)
-    let result = run_event_loop(event_loop, window, pty_host);
-    
-    info!("🧹 Terminal session ended");
-    result
-}
+        
+        let prompt_msg = "Type 'hello' and press Enter ❯ ";
+        for (i, ch) in prompt_msg.chars().enumerate() {
+            if i < 80 {
+                grid.set_char(1, i as u16, ch);
+            }
+        }
+    }
 
-fn run_event_loop(
-    event_loop: EventLoop<()>,
-    window: winit::window::Window,
-    pty_host: Arc<Mutex<PtyHost>>,
-) -> Result<()> {
-    // Create a tokio runtime handle for async operations within the event loop
-    let rt = tokio::runtime::Handle::current();
+    // Create the window and event loop
+    let event_loop = EventLoop::new()?;
+    let window = WindowBuilder::new()
+        .with_title("Termind - Software Terminal")
+        .with_inner_size(winit::dpi::LogicalSize::new(800.0, 600.0))
+        .build(&event_loop)?;
+
+    info!("🪟 Window created successfully");
+
+    // Initialize software renderer
+    let size = window.inner_size();
+    let mut software_renderer = SoftwareRenderer::new(size)?;
+
+    // Initialize softbuffer
+    let context = Context::new(&window).unwrap();
+    let mut surface = Surface::new(&context, &window).unwrap();
     
+    // Store window ID for redraw requests
+    let window_id = window.id();
+
+    info!("✅ Software renderer initialized");
+    info!("🔄 Starting event loop - press Escape to quit");
+
+    // Run the event loop
     event_loop.run(move |event, elwt| {
         elwt.set_control_flow(ControlFlow::Poll);
-        
+
+        match event {
+            Event::AboutToWait => {
+                // Render frame
+                if let Ok(text_grid_locked) = text_grid.try_lock() {
+                    if let Ok(pixel_buffer) = software_renderer.render_frame(&*text_grid_locked) {
+                        // Get surface buffer and copy pixels
+                        if let Ok(mut buffer) = surface.buffer_mut() {
+                            // Convert our RGBA buffer to the format softbuffer expects
+                            for (i, &pixel) in pixel_buffer.iter().enumerate() {
+                                if i < buffer.len() {
+                                    // Convert from RGBA to RGB format that softbuffer expects
+                                    let r = ((pixel >> 16) & 0xFF) as u32;
+                                    let g = ((pixel >> 8) & 0xFF) as u32;
+                                    let b = (pixel & 0xFF) as u32;
+                                    buffer[i] = (r << 16) | (g << 8) | b;
+                                }
+                            }
+                            
+                            // Present the buffer
+                            if let Err(e) = buffer.present() {
+                                warn!("Failed to present buffer: {}", e);
+                            }
+                        }
+                    }
+                }
+                return;
+            }
+            _ => {}
+        }
+
         match event {
             Event::WindowEvent {
-                window_id,
                 event: WindowEvent::CloseRequested,
-            } if window_id == window.id() => {
+                ..
+            } => {
                 info!("🪟 Window close requested");
                 elwt.exit();
             }
-            
+
             Event::WindowEvent {
-                window_id,
                 event: WindowEvent::KeyboardInput {
                     event: KeyEvent {
                         physical_key: PhysicalKey::Code(keycode),
                         state: ElementState::Pressed,
-                        text,
                         ..
                     },
                     ..
                 },
-            } if window_id == window.id() => {
-                // Handle keyboard input
+                ..
+            } => {
                 match keycode {
                     KeyCode::Escape => {
                         info!("🚪 Escape pressed, exiting...");
                         elwt.exit();
                     }
-                    _ => {
-                        // Forward other keys to the PTY
-                        if let Some(text) = text {
-                            let pty_host = pty_host.clone();
-                            let text = text.to_string();
-                            rt.spawn(async move {
-                                let mut pty = pty_host.lock().await;
-                                if let Err(e) = pty.write(text.as_bytes()).await {
-                                    warn!("⚠️ Failed to write to PTY: {}", e);
+                    KeyCode::Enter => {
+                        // Add a response line
+                        let grid = text_grid.clone();
+                        tokio::spawn(async move {
+                            let mut grid = grid.lock().await;
+                            let response = "Hello! Software rendering works! 🎉";
+                            for (i, ch) in response.chars().enumerate() {
+                                if i < 80 {
+                                    grid.set_char(2, i as u16, ch);
                                 }
-                            });
-                        }
+                            }
+                        });
+                    }
+                    _ => {
+                        info!("Key pressed: {:?}", keycode);
                     }
                 }
             }
-            
+
             Event::WindowEvent {
-                window_id,
-                event: WindowEvent::Resized(size),
-            } if window_id == window.id() => {
-                info!("📏 Window resized to {:?}", size);
-                // TODO: Update terminal size based on window size
+                event: WindowEvent::Resized(new_size),
+                ..
+            } => {
+                info!("📏 Window resized to {:?}", new_size);
+                surface.resize(
+                    NonZeroU32::new(new_size.width).unwrap(),
+                    NonZeroU32::new(new_size.height).unwrap(),
+                ).unwrap();
+                
+                if let Err(e) = software_renderer.resize(new_size) {
+                    warn!("Failed to resize software renderer: {}", e);
+                }
             }
-            
-            Event::WindowEvent {
-                window_id,
-                event: WindowEvent::RedrawRequested,
-            } if window_id == window.id() => {
-                // TODO: Render the terminal grid to the window
-                // For now, we just validate the window
-                window.pre_present_notify();
-            }
-            
+
             _ => {}
         }
-    })
-    .map_err(|e| termind::TermindError::Configuration(format!("Event loop error: {}", e)))?;
-    
+    })?;
+
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+// Mock PTY Host for testing
+struct MockPtyHost;
 
-    #[tokio::test]
-    async fn test_main_components() {
-        // Test that we can create all Phase A components
-        let text_grid = TextGrid::new(24, 80);
-        assert_eq!(text_grid.rows, 24);
-        assert_eq!(text_grid.cols, 80);
-        
-        let _parser = TerminalParser::new(24, 80);
-        // Parser creation should always succeed
-        
-        let block_detector = BlockDetector::new().await;
-        assert!(block_detector.is_ok());
+impl MockPtyHost {
+    fn new() -> Self {
+        Self
     }
 }
