@@ -19,8 +19,6 @@ use winit::{
     keyboard::{KeyCode, PhysicalKey},
 };
 
-use softbuffer::{Context, Surface};
-use std::num::NonZeroU32;
 
 // Use termind library components
 use termind::{

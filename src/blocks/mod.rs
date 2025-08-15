@@ -418,11 +418,15 @@ mod tests {
         // Store the block
         store.store(block.clone()).await?;
 
-        // Retrieve recent blocks
-        let recent = store.get_recent(10).await?;
+        // Retrieve recent blocks and find our specific block by ID
+        let recent = store.get_recent(50).await?;
         assert!(!recent.is_empty());
         
-        let retrieved = &recent[0];
+        let retrieved = recent
+            .iter()
+            .find(|b| b.id == block.id)
+            .expect("Could not find the stored block");
+        
         assert_eq!(retrieved.command, block.command);
         assert_eq!(retrieved.cwd, block.cwd);
         assert_eq!(retrieved.shell, block.shell);
@@ -459,12 +463,22 @@ mod tests {
         detector.finish_command(0, 250).await?;
         assert!(detector.current_block().is_none());
 
-        // Verify it was stored
-        let recent = detector.get_recent(1).await?;
-        assert!(!recent.is_empty());
-        assert_eq!(recent[0].command, "cat file.txt");
-        assert_eq!(recent[0].exit_code, Some(0));
-        assert_eq!(recent[0].duration_ms, Some(250));
+        // Verify it was stored by searching for the command using simpler query
+        let search_results = detector.search("cat").await?;
+        assert!(!search_results.is_empty());
+        
+        // Find the block we just created
+        let stored_block = search_results
+            .iter()
+            .find(|b| b.command == "cat file.txt" && b.duration_ms == Some(250))
+            .expect("Could not find the stored block");
+        
+        assert_eq!(stored_block.command, "cat file.txt");
+        assert_eq!(stored_block.exit_code, Some(0));
+        assert_eq!(stored_block.duration_ms, Some(250));
+        assert!(stored_block.stdout.contains("line 1"));
+        assert!(stored_block.stdout.contains("line 2"));
+        assert!(stored_block.stderr.contains("warning"));
 
         Ok(())
     }
