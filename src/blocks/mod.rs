@@ -1,8 +1,11 @@
 // Block-based data model for Termind (Phase A foundation)
 // This will store command blocks with SQLite in Phase A Week 3
 
+pub mod context;
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use crate::blocks::context::ExecutionContext;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Block {
@@ -17,6 +20,7 @@ pub struct Block {
     pub stdout: String,
     pub stderr: String,
     pub tags: Vec<String>,
+    pub context: Option<ExecutionContext>,
 }
 
 impl Block {
@@ -33,7 +37,13 @@ impl Block {
             stdout: String::new(),
             stderr: String::new(),
             tags: Vec::new(),
+            context: None,
         }
+    }
+    
+    pub fn with_context(mut self, context: ExecutionContext) -> Self {
+        self.context = Some(context);
+        self
     }
     
     pub fn with_output(mut self, stdout: String, stderr: String) -> Self {
@@ -353,6 +363,7 @@ impl BlockStore {
             stdout: row.try_get("stdout")?,
             stderr: row.try_get("stderr")?,
             tags,
+            context: None, // TODO: Add context storage to database
         })
     }
 }
