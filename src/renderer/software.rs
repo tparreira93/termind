@@ -3,6 +3,15 @@ use winit::dpi::PhysicalSize;
 
 use crate::renderer::{TextGrid, RenderError};
 
+/// Represents a rectangular cell in the terminal grid
+#[derive(Debug, Clone, Copy)]
+struct CellRect {
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+}
+
 pub struct SoftwareRenderer {
     font: Font,
     font_size: f32,
@@ -10,6 +19,15 @@ pub struct SoftwareRenderer {
     char_height: u32,
     size: PhysicalSize<u32>,
     pixel_buffer: Vec<u32>, // RGBA pixels
+    // Grid properties
+    grid_cols: u32,
+    grid_rows: u32,
+    cell_width: u32,
+    cell_height: u32,
+    // Font baseline info for consistent positioning
+    baseline_offset: u32,
+    ascent: f32,
+    descent: f32,
 }
 
 impl SoftwareRenderer {
@@ -32,16 +50,35 @@ impl SoftwareRenderer {
         let (metrics, _) = font.rasterize('M', font_size); // Use 'M' for measuring
         let line_metrics = font.horizontal_line_metrics(font_size).unwrap();
         
-        // Use advance width for character width (includes spacing)
-        let char_width = metrics.advance_width.ceil() as u32;
+        // Store font metrics for consistent baseline positioning
+        let ascent = line_metrics.ascent;
+        let descent = line_metrics.descent;
         
-        // Use proper line height (ascent + descent + line gap)
-        let char_height = (line_metrics.ascent - line_metrics.descent + line_metrics.line_gap).ceil() as u32;
+        // Calculate ideal cell dimensions (make them slightly larger than character bounds)
+        let char_width = metrics.advance_width.ceil() as u32;
+        let char_height = (ascent - descent + line_metrics.line_gap).ceil() as u32;
+        
+        // Make cells uniform rectangles with some padding
+        let cell_width = char_width.max(12); // Minimum cell width
+        let cell_height = char_height.max(20); // Minimum cell height
+        
+        // Calculate grid dimensions based on window size
+        let padding = 8; // 8px padding around the entire grid
+        let usable_width = size.width.saturating_sub(padding * 2);
+        let usable_height = size.height.saturating_sub(padding * 2);
+        
+        let grid_cols = usable_width / cell_width;
+        let grid_rows = usable_height / cell_height;
+        
+        // Calculate baseline offset within each cell (where characters sit)
+        let baseline_offset = (cell_height as f32 * 0.8) as u32;
         
         tracing::info!("📊 Font metrics - advance_width: {}, ascent: {}, descent: {}, line_gap: {}", 
-                      metrics.advance_width, line_metrics.ascent, line_metrics.descent, line_metrics.line_gap);
+                      metrics.advance_width, ascent, descent, line_metrics.line_gap);
         
         tracing::info!("🔤 Character dimensions: {}x{}", char_width, char_height);
+        tracing::info!("📐 Cell dimensions: {}x{}", cell_width, cell_height);
+        tracing::info!("📋 Grid dimensions: {}x{} cells", grid_cols, grid_rows);
         
         let pixel_buffer = vec![0xFF000000u32; (size.width * size.height) as usize]; // Black background
         
@@ -52,6 +89,13 @@ impl SoftwareRenderer {
             char_height,
             size,
             pixel_buffer,
+            grid_cols,
+            grid_rows,
+            cell_width,
+            cell_height,
+            baseline_offset,
+            ascent,
+            descent,
         })
     }
     
@@ -87,35 +131,36 @@ impl SoftwareRenderer {
         
         let mut chars_rendered = 0;
         
-        // Render each character in the grid
-        let max_rows = (self.size.height / self.char_height) as u16;
-        let max_cols = (self.size.width / self.char_width) as u16;
+        // First, optionally draw grid lines for debugging (remove in production)
+        self.draw_debug_grid();
         
-        tracing::debug!("📐 Grid render area: max_rows={}, max_cols={}, char_size={}x{}", 
-                       max_rows, max_cols, self.char_width, self.char_height);
+        // Calculate grid offset to center the terminal grid
+        let padding = 8;
+        let grid_start_x = padding;
+        let grid_start_y = padding;
         
-        for row in 0..grid.rows.min(max_rows) {
+        // Render each character within its designated cell
+        let max_rows = grid.rows.min(self.grid_rows as u16);
+        let max_cols = self.grid_cols.min(80) as u16; // Cap at typical terminal width
+        
+        tracing::debug!("📐 Grid render area: {}x{} cells, cell_size={}x{}", 
+                       max_rows, max_cols, self.cell_width, self.cell_height);
+        
+        for row in 0..max_rows {
             if let Some(row_data) = grid.row(row) {
-                for col in 0..row_data.len().min(max_cols as usize) {
+                for col in 0..(row_data.len().min(max_cols as usize)) {
                     if let Some(cell) = grid.cell_at(row, col as u16) {
-                        // Render all characters, including spaces (for proper spacing)
-                        if cell.ch != '\0' {
-                            let x = col as u32 * self.char_width;
-                            let y = row as u32 * self.char_height;
+                        if cell.ch != '\0' && cell.ch != ' ' {
+                            // Calculate the exact cell rectangle
+                            let cell_rect = self.get_cell_rect(row as u32, col as u32, grid_start_x, grid_start_y);
                             
-                            // Add padding from window edges
-                            let padded_x = x + 4; // 4px left padding
-                            let padded_y = y + 4; // 4px top padding
-                            
-                            if cell.ch != ' ' { // Don't render actual space characters
-                                self.render_char(
-                                    cell.ch,
-                                    padded_x,
-                                    padded_y,
-                                    0xFFFFFFFFu32, // White text
-                                );
-                                chars_rendered += 1;
-                            }
+                            // Render character centered within its cell
+                            self.render_char_in_cell(
+                                cell.ch,
+                                cell_rect,
+                                0xFFFFFFFFu32, // White text
+                            );
+                            chars_rendered += 1;
                         }
                     }
                 }
@@ -123,7 +168,7 @@ impl SoftwareRenderer {
         }
         
         if chars_rendered > 0 {
-            tracing::debug!("🔤 Software rendered {} characters", chars_rendered);
+            tracing::debug!("🔤 Software rendered {} characters in grid cells", chars_rendered);
         } else {
             tracing::debug!("⚠️  No characters to render (grid may be empty)");
         }
@@ -131,59 +176,109 @@ impl SoftwareRenderer {
         Ok(&self.pixel_buffer)
     }
     
-    fn render_char(&mut self, ch: char, x: u32, y: u32, color: u32) {
-        let (metrics, bitmap) = self.font.rasterize(ch, self.font_size);
+    /// Calculate the exact rectangle for a grid cell
+    fn get_cell_rect(&self, row: u32, col: u32, grid_start_x: u32, grid_start_y: u32) -> CellRect {
+        let x = grid_start_x + col * self.cell_width;
+        let y = grid_start_y + row * self.cell_height;
         
-        // Calculate proper baseline positioning
-        // Fontdue gives us metrics relative to the baseline, but we need to position
-        // the character correctly within our line height
-        let baseline_offset = (self.char_height as f32 * 0.8) as u32; // Approximate baseline position
+        CellRect {
+            x,
+            y,
+            width: self.cell_width,
+            height: self.cell_height,
+        }
+    }
+    
+    /// Draw debug grid lines (optional, for development)
+    fn draw_debug_grid(&mut self) {
+        // Enable to see grid lines for debugging
+        let grid_color = 0xFF222222u32; // Very dark gray
+        let padding = 8;
         
-        // Handle negative ymin values safely to avoid overflow
-        let char_y = if metrics.ymin < 0 {
-            y + baseline_offset + (-metrics.ymin) as u32
-        } else {
-            y + baseline_offset - metrics.ymin as u32
-        };
-        
-        // Reduced debug logging to avoid spam
-        if ch == 'T' || ch == 'H' { // Only log certain characters
-            tracing::debug!("Rendering '{}' at ({}, {}) -> baseline adjusted ({}, {}), metrics: {}x{}, ymin: {}", 
-                           ch, x, y, x, char_y, metrics.width, metrics.height, metrics.ymin);
+        // Draw vertical lines (every few cells to avoid clutter)
+        for col in (0..=self.grid_cols).step_by(5) {
+            let x = padding + col * self.cell_width;
+            if x < self.size.width {
+                for y in padding..(padding + self.grid_rows * self.cell_height).min(self.size.height) {
+                    let idx = (y * self.size.width + x) as usize;
+                    if idx < self.pixel_buffer.len() {
+                        self.pixel_buffer[idx] = grid_color;
+                    }
+                }
+            }
         }
         
-        // Draw character bitmap to pixel buffer
+        // Draw horizontal lines (every few cells to avoid clutter)
+        for row in (0..=self.grid_rows).step_by(5) {
+            let y = padding + row * self.cell_height;
+            if y < self.size.height {
+                for x in padding..(padding + self.grid_cols * self.cell_width).min(self.size.width) {
+                    let idx = (y * self.size.width + x) as usize;
+                    if idx < self.pixel_buffer.len() {
+                        self.pixel_buffer[idx] = grid_color;
+                    }
+                }
+            }
+        }
+    }
+    
+    /// Render a character within a specific cell rectangle
+    fn render_char_in_cell(&mut self, ch: char, cell_rect: CellRect, color: u32) {
+        let (metrics, bitmap) = self.font.rasterize(ch, self.font_size);
+        
+        // Calculate character position within the cell
+        // Center horizontally, align to baseline vertically
+        let char_x = cell_rect.x + (cell_rect.width.saturating_sub(metrics.width as u32)) / 2;
+        let char_y = cell_rect.y + self.baseline_offset;
+        
+        // Adjust for font metrics (handle negative ymin safely)
+        let final_char_y = if metrics.ymin < 0 {
+            char_y + (-metrics.ymin) as u32
+        } else {
+            char_y.saturating_sub(metrics.ymin as u32)
+        };
+        
+        // Debug logging for first few characters
+        if ch == 'T' || ch == 'H' {
+            tracing::debug!("Rendering '{}' in cell ({}, {}, {}x{}) -> char pos ({}, {}), metrics: {}x{}", 
+                           ch, cell_rect.x, cell_rect.y, cell_rect.width, cell_rect.height,
+                           char_x, final_char_y, metrics.width, metrics.height);
+        }
+        
+        // Draw character bitmap within the cell bounds
         for bitmap_y in 0..metrics.height {
             for bitmap_x in 0..metrics.width {
-                let pixel_x = x + bitmap_x as u32;
-                let pixel_y = char_y + bitmap_y as u32;
+                let pixel_x = char_x + bitmap_x as u32;
+                let pixel_y = final_char_y + bitmap_y as u32;
                 
-                if pixel_x < self.size.width && pixel_y < self.size.height {
+                // Ensure we stay within cell boundaries and screen bounds
+                if pixel_x >= cell_rect.x && pixel_x < cell_rect.x + cell_rect.width &&
+                   pixel_y >= cell_rect.y && pixel_y < cell_rect.y + cell_rect.height &&
+                   pixel_x < self.size.width && pixel_y < self.size.height {
+                    
                     let bitmap_idx = bitmap_y * metrics.width + bitmap_x;
                     if bitmap_idx < bitmap.len() {
                         let alpha = bitmap[bitmap_idx];
-                        if alpha > 0 {
-                            // Better alpha blending: use actual alpha value
-                            if alpha > 64 { // Lower threshold for better antialiasing
-                                let buffer_idx = (pixel_y * self.size.width + pixel_x) as usize;
-                                if buffer_idx < self.pixel_buffer.len() {
-                                    // Simple alpha blend with existing pixel
-                                    let alpha_f = alpha as f32 / 255.0;
-                                    let existing = self.pixel_buffer[buffer_idx];
-                                    let existing_r = ((existing >> 16) & 0xFF) as f32;
-                                    let existing_g = ((existing >> 8) & 0xFF) as f32;
-                                    let existing_b = (existing & 0xFF) as f32;
-                                    
-                                    let new_r = ((color >> 16) & 0xFF) as f32;
-                                    let new_g = ((color >> 8) & 0xFF) as f32;
-                                    let new_b = (color & 0xFF) as f32;
-                                    
-                                    let blended_r = (existing_r * (1.0 - alpha_f) + new_r * alpha_f) as u32;
-                                    let blended_g = (existing_g * (1.0 - alpha_f) + new_g * alpha_f) as u32;
-                                    let blended_b = (existing_b * (1.0 - alpha_f) + new_b * alpha_f) as u32;
-                                    
-                                    self.pixel_buffer[buffer_idx] = 0xFF000000 | (blended_r << 16) | (blended_g << 8) | blended_b;
-                                }
+                        if alpha > 64 { // Antialiasing threshold
+                            let buffer_idx = (pixel_y * self.size.width + pixel_x) as usize;
+                            if buffer_idx < self.pixel_buffer.len() {
+                                // High-quality alpha blending
+                                let alpha_f = alpha as f32 / 255.0;
+                                let existing = self.pixel_buffer[buffer_idx];
+                                
+                                let existing_r = ((existing >> 16) & 0xFF) as f32;
+                                let existing_g = ((existing >> 8) & 0xFF) as f32;
+                                let existing_b = (existing & 0xFF) as f32;
+                                
+                                let new_r = ((color >> 16) & 0xFF) as f32;
+                                let new_g = ((color >> 8) & 0xFF) as f32;
+                                let new_b = (color & 0xFF) as f32;
+                                
+                                let blended_r = (existing_r * (1.0 - alpha_f) + new_r * alpha_f).clamp(0.0, 255.0) as u32;
+                                let blended_g = (existing_g * (1.0 - alpha_f) + new_g * alpha_f).clamp(0.0, 255.0) as u32;
+                                let blended_b = (existing_b * (1.0 - alpha_f) + new_b * alpha_f).clamp(0.0, 255.0) as u32;
+                                
+                                self.pixel_buffer[buffer_idx] = 0xFF000000 | (blended_r << 16) | (blended_g << 8) | blended_b;
                             }
                         }
                     }
@@ -196,7 +291,17 @@ impl SoftwareRenderer {
         if new_size.width > 0 && new_size.height > 0 {
             self.size = new_size;
             self.pixel_buffer = vec![0xFF000000u32; (new_size.width * new_size.height) as usize];
+            
+            // Recalculate grid dimensions for new window size
+            let padding = 8;
+            let usable_width = new_size.width.saturating_sub(padding * 2);
+            let usable_height = new_size.height.saturating_sub(padding * 2);
+            
+            self.grid_cols = usable_width / self.cell_width;
+            self.grid_rows = usable_height / self.cell_height;
+            
             tracing::info!("📏 Software renderer resized to {}x{}", new_size.width, new_size.height);
+            tracing::info!("📋 New grid dimensions: {}x{} cells", self.grid_cols, self.grid_rows);
         }
         Ok(())
     }
