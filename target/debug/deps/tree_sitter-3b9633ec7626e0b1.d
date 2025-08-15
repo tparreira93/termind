@@ -1,9 +1,0 @@
-/Users/tpi13/workspace/other/termind/target/debug/deps/libtree_sitter-3b9633ec7626e0b1.rmeta: /Users/tpi13/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tree-sitter-0.20.10/binding_rust/lib.rs /Users/tpi13/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tree-sitter-0.20.10/binding_rust/ffi.rs /Users/tpi13/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tree-sitter-0.20.10/binding_rust/util.rs /Users/tpi13/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tree-sitter-0.20.10/binding_rust/./bindings.rs /Users/tpi13/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tree-sitter-0.20.10/binding_rust/../include/tree_sitter/parser.h
-
-/Users/tpi13/workspace/other/termind/target/debug/deps/tree_sitter-3b9633ec7626e0b1.d: /Users/tpi13/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tree-sitter-0.20.10/binding_rust/lib.rs /Users/tpi13/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tree-sitter-0.20.10/binding_rust/ffi.rs /Users/tpi13/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tree-sitter-0.20.10/binding_rust/util.rs /Users/tpi13/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tree-sitter-0.20.10/binding_rust/./bindings.rs /Users/tpi13/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tree-sitter-0.20.10/binding_rust/../include/tree_sitter/parser.h
-
-/Users/tpi13/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tree-sitter-0.20.10/binding_rust/lib.rs:
-/Users/tpi13/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tree-sitter-0.20.10/binding_rust/ffi.rs:
-/Users/tpi13/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tree-sitter-0.20.10/binding_rust/util.rs:
-/Users/tpi13/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tree-sitter-0.20.10/binding_rust/./bindings.rs:
-/Users/tpi13/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tree-sitter-0.20.10/binding_rust/../include/tree_sitter/parser.h:
